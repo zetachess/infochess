@@ -1,1 +1,214 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+
+  <!-- TÍTULO DE LA PESTAÑA -->
+  <title>AN Diego Álvarez</title>
+
+  <style>
+    body{
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      background: linear-gradient(180deg,#0b1020,#111633);
+      color:#eef2ff;
+      max-width:900px;
+      margin:0 auto;
+      padding:30px 20px;
+    }
+    h1{
+      text-align:center;
+      font-size:32px;
+      margin-bottom:5px;
+    }
+    .sub{
+      text-align:center;
+      color:#c7d2fe;
+      margin-bottom:30px;
+    }
+    label{
+      display:block;
+      margin-top:20px;
+      font-weight:bold;
+    }
+    input{
+      width:100%;
+      padding:14px;
+      margin-top:6px;
+      border-radius:12px;
+      border:1px solid #334155;
+      background:#020617;
+      color:#e5e7eb;
+      font-size:15px;
+    }
+    button{
+      width:100%;
+      margin-top:25px;
+      padding:14px;
+      font-size:18px;
+      border:none;
+      border-radius:14px;
+      cursor:pointer;
+      background:#4f46e5;
+      color:white;
+    }
+    .box{
+      margin-top:25px;
+      padding:15px;
+      border-radius:14px;
+    }
+    .ok{background:#14532d}
+    .bad{background:#7f1d1d}
+    .warn{background:#78350f}
+    .row{
+      background:#020617;
+      border:1px solid #334155;
+      padding:10px;
+      margin-top:8px;
+      border-radius:10px;
+      font-family: monospace;
+      font-size:13px;
+    }
+    footer{
+      margin-top:40px;
+      text-align:center;
+      color:#94a3b8;
+      font-size:13px;
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- TÍTULO PRINCIPAL -->
+  <h1>AN Diego Álvarez</h1>
+  <div class="sub">Comparador automático de rondas Info64 / Chess-Results</div>
+
+  <label>Comprobar ronda de Info64</label>
+  <input id="info64" placeholder="Pega aquí el link de la ronda en Info64">
+
+  <label>Comprobar ronda de Chess-Results</label>
+  <input id="chess" placeholder="Pega aquí el link de la ronda en Chess-Results">
+
+  <button onclick="comprobar()">Comprobar</button>
+
+  <div id="resultado" class="box"></div>
+  <div id="detalles"></div>
+
+<script>
+const PROXY = "https://api.allorigins.win/raw?url=";
+
+function limpiarNombre(s){
+  return s.toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g,"")
+    .replace(/^(gm|im|fm|cm|wgm|wim|wfm|wcm)\s+/i,"")
+    .replace(/\s+/g," ")
+    .trim();
+}
+
+function limpiarResultado(s){
+  return s.replace(/\s+/g,"")
+          .replace("½","1/2")
+          .replace("–","-")
+          .replace(":","-");
+}
+
+function esResultado(r){
+  return /^(1|0|1\/2)-(1|0|1\/2)$/.test(r);
+}
+
+async function descargar(url){
+  const r = await fetch(PROXY + encodeURIComponent(url));
+  return await r.text();
+}
+
+function parsear(html){
+  const filas = html.match(/<tr[\s\S]*?<\/tr>/gi) || [];
+  const partidas = {};
+
+  filas.forEach(f=>{
+    const c = [...f.matchAll(/<td[^>]*>(.*?)<\/td>/gi)]
+      .map(x=>x[1].replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim());
+
+    if(c.length>=4 && /^\d+$/.test(c[0])){
+      const mesa = parseInt(c[0],10);
+      const res = limpiarResultado(c[2]);
+      if(!esResultado(res)) return;
+
+      partidas[mesa] = {
+        w: limpiarNombre(c[1]),
+        r: res,
+        b: limpiarNombre(c[3])
+      };
+    }
+  });
+  return partidas;
+}
+
+async function comprobar(){
+  const info64 = info64El.value.trim();
+  const chess  = chessEl.value.trim();
+  const resDiv = resultado;
+  const detDiv = detalles;
+
+  detDiv.innerHTML="";
+  resDiv.className="box warn";
+  resDiv.textContent="Comprobando...";
+
+  if(!info64 || !chess){
+    resDiv.className="box bad";
+    resDiv.textContent="ERROR: pega los dos enlaces.";
+    return;
+  }
+
+  try{
+    const [h1,h2] = await Promise.all([descargar(info64), descargar(chess)]);
+    const a = parsear(h1);
+    const b = parsear(h2);
+
+    const mesas = new Set([...Object.keys(a),...Object.keys(b)]);
+    let errores = [];
+
+    mesas.forEach(m=>{
+      const A=a[m], B=b[m];
+      if(!A || !B){
+        errores.push(`Mesa ${m}: falta en una web`);
+      } else if(A.r!==B.r){
+        errores.push(`Mesa ${m}: resultado distinto`);
+      } else if(A.w!==B.w || A.b!==B.b){
+        errores.push(`Mesa ${m}: nombres distintos`);
+      }
+    });
+
+    if(errores.length===0){
+      resDiv.className="box ok";
+      resDiv.textContent="OK: todo coincide";
+    }else{
+      resDiv.className="box bad";
+      resDiv.textContent="ERROR: hay diferencias";
+      errores.forEach(e=>{
+        const d=document.createElement("div");
+        d.className="row";
+        d.textContent=e;
+        detDiv.appendChild(d);
+      });
+    }
+  }catch(e){
+    resDiv.className="box bad";
+    resDiv.textContent="ERROR: no se pudo comprobar";
+  }
+}
+
+const info64El = document.getElementById("info64");
+const chessEl  = document.getElementById("chess");
+const resultado = document.getElementById("resultado");
+const detalles = document.getElementById("detalles");
+</script>
+
+<footer>
+  © AN Diego Álvarez — Verificador de rondas
+</footer>
+
+</body>
+</html>
 
